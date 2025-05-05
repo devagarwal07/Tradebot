@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import * as stockController from "./controllers/stockController";
 import * as tradingController from "./controllers/tradingController";
+import * as backtestController from "./controllers/backtestController";
 
 export async function registerRoutes(app: Express): Promise<Server | Express> {
   // Stock routes
@@ -34,6 +35,12 @@ export async function registerRoutes(app: Express): Promise<Server | Express> {
 
   // Authentication routes
   app.post("/api/auth/verify-api-key", tradingController.verifyApiKey);
+  
+  // Backtesting routes
+  app.post("/api/backtest/run", backtestController.runBacktestController);
+  app.get("/api/backtest/list", backtestController.getUserBacktestsController);
+  app.get("/api/backtest/strategies", backtestController.getBacktestStrategiesController);
+  app.get("/api/backtest/:id", backtestController.getBacktestDetailsController);
 
   // For non-serverless environments, create and return an HTTP server
   if (process.env.NODE_ENV !== 'production' || process.env.SERVER_MODE === 'standalone') {

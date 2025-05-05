@@ -4,6 +4,23 @@ import session from 'express-session';
 import passport from 'passport';
 import memorystore from 'memorystore';
 import { registerRoutes } from '../server/routes';
+import { seedDatabase } from '../server/seed';
+import { angelOneApi } from '../server/utils/angelOne';
+
+// Initialize AngelOne API if key is set
+if (process.env.ANGELONE_API_KEY) {
+  angelOneApi.reinitializeAPI().catch((err) => {
+    console.error('Failed to initialize AngelOne API:', err);
+  });
+} else {
+  console.warn('AngelOne API Key not found. API will not be fully functional.');
+}
+
+// Seed the database if needed - this is async but we don't need to await it in serverless
+// since Vercel will keep the container warm after the first request
+seedDatabase().catch(err => {
+  console.error('Database seeding error:', err);
+});
 
 // Create Express memory store
 const MemoryStore = memorystore(session);

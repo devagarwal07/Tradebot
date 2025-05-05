@@ -1,61 +1,110 @@
-# AngelOne Automated Trading Platform
+# Automated Stock Trading Platform
 
-An automated stock trading platform that uses AngelOne for executing trades based on user-selected strategies.
+A full-stack application for automated stock trading using AngelOne's API, built with React, Express, and PostgreSQL.
 
 ## Features
 
-- 📈 Stock search and real-time market data
-- 🤖 Automated trading with configurable strategies
-- 📊 Performance tracking and analytics
-- 💼 Portfolio management
-- 🔐 Secure API integration with AngelOne
-- 🗄️ Persistent data storage with PostgreSQL database
+- Real-time stock market data viewing
+- Multiple trading strategy implementation (MACD, RSI, Moving Averages, Bollinger Bands)
+- Automated trade execution based on selected strategies
+- Comprehensive portfolio tracking
+- Performance analytics
+- Risk analysis
+- User settings and preferences management
 
-## Tech Stack
+## Technologies Used
 
-- **Frontend**: React, TailwindCSS, Shadcn UI components
-- **Backend**: Express.js, Node.js
-- **Database**: PostgreSQL with Drizzle ORM
-- **Trading**: AngelOne API integration
-- **Charts**: Lightweight Charts
+- **Frontend:** React, TailwindCSS, Shadcn/UI, React Query, wouter
+- **Backend:** Express.js, Passport.js
+- **Database:** PostgreSQL with Drizzle ORM
+- **Charting:** Lightweight Charts
+- **Deployment:** Vercel
 
-## Deploying to Vercel
+## Getting Started
 
 ### Prerequisites
 
-1. Create a Vercel account at https://vercel.com
-2. Install the Vercel CLI: `npm i -g vercel`
-3. Have your PostgreSQL database URL ready (Neon, Railway, etc.)
+- Node.js (v18+)
+- PostgreSQL database
+- AngelOne trading account with API access
 
-### Steps to Deploy
+### Environment Variables
 
-1. Clone this repository
-2. Copy `.env.example` to `.env` and fill in your database credentials and AngelOne API key
-3. Run `vercel login` to log into your Vercel account
-4. Run `vercel` in the project root directory to deploy
-5. When prompted, set the following environment variables:
-   - `DATABASE_URL`: Your PostgreSQL database connection string
-   - `ANGELONE_API_KEY`: Your AngelOne API key
-   - `SESSION_SECRET`: A secret string for securing sessions
-   - `SERVER_MODE`: Set to `serverless` for Vercel deployment
+Create a `.env` file in the root directory with the following variables:
 
-### Project Structure for Vercel
+```
+DATABASE_URL=postgresql://username:password@localhost:5432/trading_app
+ANGELONE_API_KEY=your_angelone_api_key
+SESSION_SECRET=your_session_secret
+```
 
-The project uses a hybrid approach that works both locally and on Vercel:
+### Installation
 
-- `/api` directory: Contains serverless functions for Vercel
-- `/server` directory: Contains the full Express server for local development
-- `/client` directory: Contains the React frontend
+1. Clone the repository
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+3. Push the database schema:
+   ```bash
+   npm run db:push
+   ```
+4. Start the development server:
+   ```bash
+   npm run dev
+   ```
 
-The `vercel.json` configuration routes API requests to serverless functions and all other requests to the static frontend.
+## Deployment
 
-## Local Development
+This application is configured for deployment on Vercel.
 
-1. Install dependencies: `npm install`
-2. Create a PostgreSQL database and update your `.env` file
-3. Push the database schema: `npm run db:push`
-4. Start the development server: `npm run dev`
+### Deploying to Vercel
+
+1. Fork this repository to your GitHub account
+2. Connect your GitHub repository to Vercel
+3. Add the required environment variables in Vercel:
+   - `DATABASE_URL`
+   - `ANGELONE_API_KEY`
+   - `SESSION_SECRET`
+4. Deploy!
+
+## API Reference
+
+### Authentication Endpoints
+
+- `POST /api/auth/login` - Login with username and password
+- `POST /api/auth/logout` - Logout current user
+
+### Stock Data Endpoints
+
+- `GET /api/stocks/search?query=<query>` - Search for stocks
+- `GET /api/stocks/<symbol>` - Get stock details
+- `GET /api/stocks/<symbol>/chart?timeframe=<1D|1W|1M|3M|1Y>` - Get stock chart data
+
+### Trading Endpoints
+
+- `GET /api/trading/orders` - Get active orders
+- `GET /api/trading/history` - Get trade history
+- `POST /api/trading/buy` - Place buy order
+- `POST /api/trading/sell` - Place sell order
+- `DELETE /api/trading/orders/:id` - Cancel order
+
+### Strategy Endpoints
+
+- `GET /api/strategies` - Get available strategies
+- `POST /api/strategies/start` - Start a strategy
+- `POST /api/strategies/stop/:id` - Stop a strategy
+
+### Portfolio Endpoints
+
+- `GET /api/portfolio` - Get portfolio summary and positions
+
+### Settings Endpoints
+
+- `GET /api/settings` - Get user settings
+- `PUT /api/settings` - Update user settings
+- `POST /api/settings/verify-key` - Verify AngelOne API key
 
 ## License
 
-MIT
+This project is licensed under the MIT License

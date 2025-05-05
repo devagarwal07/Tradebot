@@ -6,6 +6,7 @@ import { createServer, Server } from "http";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { angelOneApi } from "./utils/angelOne";
+import { seedDatabase } from "./seed";
 
 // Initialize AngelOne API if key is set
 if (process.env.ANGELONE_API_KEY) {
@@ -77,37 +78,45 @@ process.env.SERVER_MODE = 'standalone';
 
 // Main initialization function
 (async () => {
-  // Register routes and get server or app based on environment
-  const serverOrApp = await registerRoutes(app);
-  let server: Server;
+  try {
+    // Seed the database with initial data if needed
+    await seedDatabase();
+    
+    // Register routes and get server or app based on environment
+    const serverOrApp = await registerRoutes(app);
+    let server: Server;
   
-  // If serverOrApp is already a Server instance, use it directly
-  if (serverOrApp instanceof Server) {
-    server = serverOrApp;
-  } else {
-    // Otherwise, create a server from the Express app
-    server = createServer(app);
+    // If serverOrApp is already a Server instance, use it directly
+    if (serverOrApp instanceof Server) {
+      server = serverOrApp;
+    } else {
+      // Otherwise, create a server from the Express app
+      server = createServer(app);
+    }
+
+    // Error handler
+    app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+      const status = err.status || err.statusCode || 500;
+      const message = err.message || "Internal Server Error";
+
+      res.status(status).json({ message });
+      console.error(err);
+    });
+
+    // Setup static file serving based on environment
+    if (app.get("env") === "development") {
+      await setupVite(app, server as any);
+    } else {
+      serveStatic(app);
+    }
+
+    // Start server
+    const port = parseInt(process.env.PORT || '5000', 10);
+    server.listen(port, "0.0.0.0", () => {
+      log(`serving on port ${port}`);
+    });
+  } catch (error) {
+    console.error('Server initialization failed:', error);
+    process.exit(1);
   }
-
-  // Error handler
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-
-    res.status(status).json({ message });
-    console.error(err);
-  });
-
-  // Setup static file serving based on environment
-  if (app.get("env") === "development") {
-    await setupVite(app, server as any);
-  } else {
-    serveStatic(app);
-  }
-
-  // Start server
-  const port = parseInt(process.env.PORT || '5000', 10);
-  server.listen(port, "0.0.0.0", () => {
-    log(`serving on port ${port}`);
-  });
 })();

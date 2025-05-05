@@ -99,8 +99,11 @@ export async function seedDatabase() {
   }
 }
 
-// Run seed function directly if this file is executed directly
-if (require.main === module) {
+// For direct execution of this file in ESM
+// We can't use require.main === module in ESM
+const isMainModule = import.meta.url.endsWith('/seed.ts');
+
+if (isMainModule) {
   seedDatabase()
     .then(() => process.exit(0))
     .catch((error) => {

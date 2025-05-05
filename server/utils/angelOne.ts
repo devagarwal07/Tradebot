@@ -184,6 +184,20 @@ class AngelOneAPI {
       throw error;
     }
   }
+  
+  // Get historical data for backtesting
+  async getHistoricalData(symbol: string, startDate: Date, endDate: Date): Promise<any[]> {
+    this.ensureInitialized();
+    
+    try {
+      // In a real implementation, this would call the AngelOne historical data endpoint
+      // For now, throw an error to trigger the fallback in the backtesting service
+      throw new Error('AngelOne API getHistoricalData not implemented - using fallback');
+    } catch (error) {
+      console.error('Error getting historical data:', error);
+      throw error;
+    }
+  }
 }
 
 // Export singleton instance

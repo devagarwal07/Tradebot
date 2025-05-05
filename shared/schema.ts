@@ -246,3 +246,76 @@ export const settingsRelations = relations(settings, ({ one }) => ({
     references: [users.id],
   }),
 }));
+
+// Backtesting tables
+export const backtests = pgTable("backtests", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id),
+  strategyId: integer("strategy_id").notNull().references(() => strategies.id),
+  stockSymbol: text("stock_symbol").notNull(),
+  startDate: timestamp("start_date").notNull(),
+  endDate: timestamp("end_date").notNull(),
+  initialCapital: doublePrecision("initial_capital").notNull(),
+  finalCapital: doublePrecision("final_capital").notNull(),
+  totalTrades: integer("total_trades").notNull(),
+  winningTrades: integer("winning_trades").notNull(),
+  losingTrades: integer("losing_trades").notNull(),
+  parameters: jsonb("parameters").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertBacktestSchema = createInsertSchema(backtests).pick({
+  userId: true,
+  strategyId: true,
+  stockSymbol: true,
+  startDate: true,
+  endDate: true,
+  initialCapital: true,
+  finalCapital: true,
+  totalTrades: true,
+  winningTrades: true,
+  losingTrades: true,
+  parameters: true,
+});
+
+export type InsertBacktest = z.infer<typeof insertBacktestSchema>;
+export type Backtest = typeof backtests.$inferSelect;
+
+export const backtestTrades = pgTable("backtest_trades", {
+  id: serial("id").primaryKey(),
+  backtestId: integer("backtest_id").notNull().references(() => backtests.id),
+  type: text("type", { enum: ["BUY", "SELL"] }).notNull(),
+  date: timestamp("date").notNull(),
+  price: doublePrecision("price").notNull(),
+  quantity: integer("quantity").notNull(),
+  profit: doublePrecision("profit"),
+});
+
+export const insertBacktestTradeSchema = createInsertSchema(backtestTrades).pick({
+  backtestId: true,
+  type: true,
+  date: true,
+  price: true,
+  quantity: true,
+  profit: true,
+});
+
+export type InsertBacktestTrade = z.infer<typeof insertBacktestTradeSchema>;
+export type BacktestTrade = typeof backtestTrades.$inferSelect;
+
+// Relations
+export const backtestsRelations = relations(backtests, ({ one, many }) => ({
+  user: one(users, { fields: [backtests.userId], references: [users.id] }),
+  strategy: one(strategies, { fields: [backtests.strategyId], references: [strategies.id] }),
+  trades: many(backtestTrades),
+}));
+
+export const backtestTradesRelations = relations(backtestTrades, ({ one }) => ({
+  backtest: one(backtests, { fields: [backtestTrades.backtestId], references: [backtests.id] }),
+}));
+
+// Update user relations to include backtests
+export const usersRelationsWithBacktests = relations(users, ({ many }) => ({
+  ...usersRelations.config,
+  backtests: many(backtests),
+}));
