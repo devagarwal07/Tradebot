@@ -1,4 +1,5 @@
 import { pgTable, text, serial, integer, boolean, doublePrecision, timestamp, jsonb } from "drizzle-orm/pg-core";
+import { relations } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -182,3 +183,66 @@ export const insertSettingsSchema = createInsertSchema(settings).pick({
 
 export type InsertSettings = z.infer<typeof insertSettingsSchema>;
 export type Settings = typeof settings.$inferSelect;
+
+// Define relations for the users table
+export const usersRelations = relations(users, ({ many }) => ({
+  settings: many(settings),
+  userStrategies: many(userStrategies),
+  trades: many(trades),
+  portfolios: many(portfolios),
+}));
+
+// Define relations for the strategies table
+export const strategiesRelations = relations(strategies, ({ many }) => ({
+  userStrategies: many(userStrategies),
+}));
+
+// Define relations for the userStrategies table
+export const userStrategiesRelations = relations(userStrategies, ({ one, many }) => ({
+  user: one(users, {
+    fields: [userStrategies.userId],
+    references: [users.id],
+  }),
+  strategy: one(strategies, {
+    fields: [userStrategies.strategyId],
+    references: [strategies.id],
+  }),
+  trades: many(trades),
+}));
+
+// Define relations for the trades table
+export const tradesRelations = relations(trades, ({ one }) => ({
+  user: one(users, {
+    fields: [trades.userId],
+    references: [users.id],
+  }),
+  userStrategy: one(userStrategies, {
+    fields: [trades.userStrategyId],
+    references: [userStrategies.id],
+  }),
+}));
+
+// Define relations for the portfolios table
+export const portfoliosRelations = relations(portfolios, ({ one, many }) => ({
+  user: one(users, {
+    fields: [portfolios.userId],
+    references: [users.id],
+  }),
+  positions: many(positions),
+}));
+
+// Define relations for the positions table
+export const positionsRelations = relations(positions, ({ one }) => ({
+  portfolio: one(portfolios, {
+    fields: [positions.portfolioId],
+    references: [portfolios.id],
+  }),
+}));
+
+// Define relations for the settings table
+export const settingsRelations = relations(settings, ({ one }) => ({
+  user: one(users, {
+    fields: [settings.userId],
+    references: [users.id],
+  }),
+}));

@@ -1,4 +1,6 @@
 import { users, type User, type InsertUser, settings, type Settings, type InsertSettings } from "@shared/schema";
+import { db } from "./db";
+import { eq } from "drizzle-orm";
 
 // modify the interface with any CRUD methods
 // you might need
@@ -14,106 +16,83 @@ export interface IStorage {
   updateSettings(userId: number, settingsData: Partial<InsertSettings>): Promise<Settings | undefined>;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<number, User>;
-  private userSettings: Map<number, Settings>;
-  currentId: number;
-  settingsId: number;
-
-  constructor() {
-    this.users = new Map();
-    this.userSettings = new Map();
-    this.currentId = 1;
-    this.settingsId = 1;
-  }
-
+export class DatabaseStorage implements IStorage {
   // User methods
   async getUser(id: number): Promise<User | undefined> {
-    return this.users.get(id);
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user || undefined;
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
+    const [user] = await db.select().from(users).where(eq(users.username, username));
+    return user || undefined;
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
-    const id = this.currentId++;
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
+    const [user] = await db
+      .insert(users)
+      .values(insertUser)
+      .returning();
     return user;
   }
 
   // Settings methods
   async getSettings(userId: number): Promise<Settings | undefined> {
-    // Find settings by userId using Array.from to avoid TypeScript iterator issues
-    const settingsArray = Array.from(this.userSettings.values());
-    return settingsArray.find(settings => settings.userId === userId);
+    const [userSettings] = await db
+      .select()
+      .from(settings)
+      .where(eq(settings.userId, userId));
+    return userSettings || undefined;
   }
 
   async saveSettings(settingsData: InsertSettings): Promise<Settings> {
     // Check if settings already exist for this user
-    const settingsEntries = Array.from(this.userSettings.entries());
-    const existingEntry = settingsEntries.find(([_, settings]) => settings.userId === settingsData.userId);
+    const existingSettings = await this.getSettings(settingsData.userId);
     
-    if (existingEntry) {
+    if (existingSettings) {
       // Update existing settings
-      const [id, existingSettings] = existingEntry;
-      const updatedSettings: Settings = {
-        ...existingSettings,
-        apiKey: settingsData.apiKey ?? existingSettings.apiKey,
-        connected: settingsData.connected ?? existingSettings.connected,
-        notifications: settingsData.notifications ?? existingSettings.notifications,
-        risk: settingsData.risk ?? existingSettings.risk,
-        preferences: settingsData.preferences ?? existingSettings.preferences,
-        updatedAt: new Date()
-      };
-      this.userSettings.set(id, updatedSettings);
+      const [updatedSettings] = await db
+        .update(settings)
+        .set({
+          ...settingsData,
+          updatedAt: new Date(),
+        })
+        .where(eq(settings.id, existingSettings.id))
+        .returning();
       return updatedSettings;
     } else {
       // Create new settings
-      const id = this.settingsId++;
-      const newSettings: Settings = {
-        id,
-        userId: settingsData.userId,
-        apiKey: settingsData.apiKey ?? null,
-        connected: settingsData.connected ?? false,
-        notifications: settingsData.notifications ?? {},
-        risk: settingsData.risk ?? {},
-        preferences: settingsData.preferences ?? {},
-        updatedAt: new Date()
-      };
-      this.userSettings.set(id, newSettings);
+      const [newSettings] = await db
+        .insert(settings)
+        .values({
+          ...settingsData,
+          updatedAt: new Date(),
+        })
+        .returning();
       return newSettings;
     }
   }
 
   async updateSettings(userId: number, settingsData: Partial<InsertSettings>): Promise<Settings | undefined> {
     // Find settings by userId
-    const settingsEntries = Array.from(this.userSettings.entries());
-    const existingEntry = settingsEntries.find(([_, settings]) => settings.userId === userId);
+    const existingSettings = await this.getSettings(userId);
     
-    if (!existingEntry) {
+    if (!existingSettings) {
       return undefined;
     }
 
-    const [id, existingSettings] = existingEntry;
-    
     // Update settings
-    const updatedSettings: Settings = {
-      ...existingSettings,
-      apiKey: settingsData.apiKey ?? existingSettings.apiKey,
-      connected: settingsData.connected ?? existingSettings.connected,
-      notifications: settingsData.notifications ?? existingSettings.notifications,
-      risk: settingsData.risk ?? existingSettings.risk,
-      preferences: settingsData.preferences ?? existingSettings.preferences,
-      updatedAt: new Date()
-    };
+    const [updatedSettings] = await db
+      .update(settings)
+      .set({
+        ...settingsData,
+        updatedAt: new Date(),
+      })
+      .where(eq(settings.id, existingSettings.id))
+      .returning();
 
-    this.userSettings.set(id, updatedSettings);
     return updatedSettings;
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();
