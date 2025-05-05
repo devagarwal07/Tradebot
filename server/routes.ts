@@ -4,7 +4,7 @@ import { storage } from "./storage";
 import * as stockController from "./controllers/stockController";
 import * as tradingController from "./controllers/tradingController";
 
-export async function registerRoutes(app: Express): Promise<Server> {
+export async function registerRoutes(app: Express): Promise<Server | Express> {
   // Stock routes
   app.get("/api/stocks/search", stockController.searchStocks);
   app.get("/api/stocks/:symbol", stockController.getStockDetails);
@@ -35,7 +35,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Authentication routes
   app.post("/api/auth/verify-api-key", tradingController.verifyApiKey);
 
-  const httpServer = createServer(app);
-
-  return httpServer;
+  // For non-serverless environments, create and return an HTTP server
+  if (process.env.NODE_ENV !== 'production' || process.env.SERVER_MODE === 'standalone') {
+    const httpServer = createServer(app);
+    return httpServer;
+  }
+  
+  // For serverless environments, just return the Express app
+  return app;
 }
