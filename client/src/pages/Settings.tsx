@@ -25,6 +25,12 @@ export default function Settings() {
     maxDailyLoss: "5",
     defaultStopLoss: "2"
   });
+  const [preferenceSettings, setPreferenceSettings] = useState({
+    defaultTimeframe: "1D",
+    defaultIndicators: ["MovingAverage", "Volume"],
+    defaultTheme: "light",
+    autoRefresh: true
+  });
   
   // Fetch current settings
   const { data: currentSettings, isLoading } = useQuery({
@@ -55,6 +61,15 @@ export default function Settings() {
           maxPositionSize: currentSettings.risk.maxPositionSize?.toString() ?? "10",
           maxDailyLoss: currentSettings.risk.maxDailyLoss?.toString() ?? "5",
           defaultStopLoss: currentSettings.risk.defaultStopLoss?.toString() ?? "2"
+        });
+      }
+
+      if (currentSettings.preferences) {
+        setPreferenceSettings({
+          defaultTimeframe: currentSettings.preferences.defaultTimeframe ?? "1D",
+          defaultIndicators: currentSettings.preferences.defaultIndicators ?? ["MovingAverage", "Volume"],
+          defaultTheme: currentSettings.preferences.defaultTheme ?? "light",
+          autoRefresh: currentSettings.preferences.autoRefresh ?? true
         });
       }
     }
@@ -139,7 +154,8 @@ export default function Settings() {
         maxPositionSize: parseFloat(riskSettings.maxPositionSize),
         maxDailyLoss: parseFloat(riskSettings.maxDailyLoss),
         defaultStopLoss: parseFloat(riskSettings.defaultStopLoss)
-      }
+      },
+      preferences: preferenceSettings
     };
     
     saveSettings.mutate(settings);
@@ -420,7 +436,12 @@ export default function Settings() {
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="default-timeframe">Default Chart Timeframe</Label>
-                <Select defaultValue="1D">
+                <Select 
+                  value={preferenceSettings.defaultTimeframe}
+                  onValueChange={(value) => 
+                    setPreferenceSettings(prev => ({ ...prev, defaultTimeframe: value }))
+                  }
+                >
                   <SelectTrigger id="default-timeframe">
                     <SelectValue placeholder="Select timeframe" />
                   </SelectTrigger>
@@ -432,29 +453,45 @@ export default function Settings() {
                     <SelectItem value="1Y">1 Year</SelectItem>
                   </SelectContent>
                 </Select>
+                <p className="text-sm text-neutral-500">
+                  Default timeframe to use when viewing stock charts
+                </p>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="default-strategy">Default Trading Strategy</Label>
-                <Select defaultValue="movingAverage">
-                  <SelectTrigger id="default-strategy">
-                    <SelectValue placeholder="Select strategy" />
+                <Label htmlFor="default-theme">Default Theme</Label>
+                <Select 
+                  value={preferenceSettings.defaultTheme}
+                  onValueChange={(value) => 
+                    setPreferenceSettings(prev => ({ ...prev, defaultTheme: value }))
+                  }
+                >
+                  <SelectTrigger id="default-theme">
+                    <SelectValue placeholder="Select theme" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="movingAverage">Moving Average Crossover</SelectItem>
-                    <SelectItem value="rsi">RSI Overbought/Oversold</SelectItem>
-                    <SelectItem value="macd">MACD Indicator</SelectItem>
-                    <SelectItem value="bollingerBands">Bollinger Bands</SelectItem>
+                    <SelectItem value="light">Light Mode</SelectItem>
+                    <SelectItem value="dark">Dark Mode</SelectItem>
+                    <SelectItem value="system">System Default</SelectItem>
                   </SelectContent>
                 </Select>
+                <p className="text-sm text-neutral-500">
+                  Choose the visual theme for the trading platform
+                </p>
               </div>
 
               <div className="flex items-center justify-between mt-4">
                 <div className="space-y-0.5">
-                  <Label htmlFor="paper-trading">Paper Trading Mode</Label>
-                  <p className="text-sm text-neutral-500">Practice trading without using real money</p>
+                  <Label htmlFor="auto-refresh">Auto-Refresh Charts</Label>
+                  <p className="text-sm text-neutral-500">Automatically refresh chart data every minute</p>
                 </div>
-                <Switch id="paper-trading" defaultChecked />
+                <Switch 
+                  id="auto-refresh" 
+                  checked={preferenceSettings.autoRefresh}
+                  onCheckedChange={(checked) => 
+                    setPreferenceSettings(prev => ({ ...prev, autoRefresh: checked }))
+                  } 
+                />
               </div>
 
               <Button 
