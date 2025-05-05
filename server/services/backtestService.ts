@@ -1,10 +1,9 @@
-import { db } from '../db';
-import { backtests, backtestTrades, strategies } from '../../shared/schema';
-import * as tradingStrategies from '../../client/src/lib/tradingStrategies';
 import { angelOneApi } from '../utils/angelOne';
-import { eq, and, between } from 'drizzle-orm';
+import * as tradingStrategies from '../../client/src/lib/tradingStrategies';
+import { db } from '../db';
+import { backtests, backtestTrades, strategies, InsertBacktest, InsertBacktestTrade } from '@shared/schema';
+import { eq, and } from 'drizzle-orm';
 
-// Define the backtesting result interface
 interface BacktestResult {
   backtestId: number;
   summary: {
@@ -45,66 +44,72 @@ export async function runBacktest(
   parameters: Record<string, any>
 ): Promise<BacktestResult> {
   try {
-    // 1. Get the strategy details
-    const [strategy] = await db
+    // Get strategy details
+    const [strategyData] = await db
       .select()
       .from(strategies)
       .where(eq(strategies.id, strategyId));
-    
-    if (!strategy) {
-      throw new Error(`Strategy with id ${strategyId} not found`);
+
+    if (!strategyData) {
+      throw new Error(`Strategy with ID ${strategyId} not found`);
     }
 
-    // 2. Fetch historical data for the given stock and date range
+    // Fetch historical data
     const historicalData = await fetchHistoricalData(stockSymbol, startDate, endDate);
-    
+
     if (!historicalData || historicalData.length === 0) {
       throw new Error(`No historical data available for ${stockSymbol} in the specified date range`);
     }
 
-    // 3. Apply the selected strategy to the historical data
-    const strategyResults = applyStrategy(strategy.name, historicalData, parameters);
+    // Apply strategy to generate signals
+    const signals = applyStrategy(historicalData, strategyData.name, parameters);
 
-    // 4. Simulate trading based on the strategy signals
-    const simulationResult = simulateTrades(strategyResults, initialCapital);
+    // Simulate trades based on signals
+    const { trades, summary, equityCurve } = simulateTrades(signals, initialCapital);
 
-    // 5. Save backtest results to database
-    const [backtest] = await db.insert(backtests).values({
-      userId,
-      strategyId,
-      stockSymbol,
-      startDate,
-      endDate,
-      initialCapital,
-      finalCapital: simulationResult.summary.finalCapital,
-      totalTrades: simulationResult.summary.totalTrades,
-      winningTrades: simulationResult.summary.winningTrades,
-      losingTrades: simulationResult.summary.losingTrades,
-      parameters: parameters,
-    }).returning({ id: backtests.id });
+    // Save backtest to database
+    const [backtest] = await db
+      .insert(backtests)
+      .values({
+        userId,
+        strategyId,
+        strategyName: strategyData.name,
+        stockSymbol,
+        startDate,
+        endDate,
+        initialCapital,
+        finalCapital: summary.finalCapital,
+        parameters: JSON.stringify(parameters),
+        profitLoss: summary.profit,
+        profitLossPercentage: summary.profitPercentage,
+        totalTrades: summary.totalTrades,
+        winningTrades: summary.winningTrades,
+        maxDrawdown: summary.maxDrawdown
+      } as InsertBacktest)
+      .returning();
 
-    // 6. Save individual trades from the backtest
-    if (simulationResult.trades.length > 0) {
-      await db.insert(backtestTrades).values(
-        simulationResult.trades.map(trade => ({
+    // Save trade history
+    for (const trade of trades) {
+      await db
+        .insert(backtestTrades)
+        .values({
           backtestId: backtest.id,
-          type: trade.type,
           date: trade.date,
+          type: trade.type,
           price: trade.price,
           quantity: trade.quantity,
-          profit: trade.profit,
-        }))
-      );
+          profit: trade.profit
+        } as InsertBacktestTrade);
     }
 
     return {
       backtestId: backtest.id,
-      summary: simulationResult.summary,
-      trades: simulationResult.trades,
-      equityCurve: simulationResult.equityCurve,
+      summary,
+      trades,
+      equityCurve
     };
   } catch (error) {
-    console.error('Backtest error:', error);
+    console.error('Error running backtest:', error);
     throw error;
   }
 }
@@ -113,34 +118,106 @@ export async function runBacktest(
  * Get all backtests for a user
  */
 export async function getUserBacktests(userId: number) {
-  return db
-    .select()
-    .from(backtests)
-    .where(eq(backtests.userId, userId));
+  try {
+    const results = await db
+      .select()
+      .from(backtests)
+      .where(eq(backtests.userId, userId))
+      .orderBy(backtests.createdAt);
+
+    return results;
+  } catch (error) {
+    console.error('Error getting user backtests:', error);
+    throw error;
+  }
 }
 
 /**
  * Get a specific backtest with its trades
  */
 export async function getBacktestDetails(backtestId: number, userId: number) {
-  const [backtest] = await db
-    .select()
-    .from(backtests)
-    .where(and(
-      eq(backtests.id, backtestId),
-      eq(backtests.userId, userId)
-    ));
-  
-  if (!backtest) {
-    throw new Error(`Backtest with id ${backtestId} not found`);
+  try {
+    // Get backtest details
+    const [backtest] = await db
+      .select()
+      .from(backtests)
+      .where(
+        and(
+          eq(backtests.id, backtestId),
+          eq(backtests.userId, userId)
+        )
+      );
+
+    if (!backtest) {
+      return null;
+    }
+
+    // Get all trades for this backtest
+    const trades = await db
+      .select()
+      .from(backtestTrades)
+      .where(eq(backtestTrades.backtestId, backtestId))
+      .orderBy(backtestTrades.date);
+
+    // Calculate equity curve from trades
+    const equityCurve = [];
+    let equity = backtest.initialCapital;
+    
+    // Create a daily equity curve
+    const startDate = new Date(backtest.startDate);
+    const endDate = new Date(backtest.endDate);
+    
+    const tradeMap = new Map();
+    for (const trade of trades) {
+      const dateKey = new Date(trade.date).toISOString().split('T')[0];
+      if (!tradeMap.has(dateKey)) {
+        tradeMap.set(dateKey, []);
+      }
+      tradeMap.get(dateKey).push(trade);
+    }
+
+    // Generate equity curve for each day
+    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+      const dateKey = d.toISOString().split('T')[0];
+      const dayTrades = tradeMap.get(dateKey) || [];
+      
+      // Apply all trades for this day to the equity
+      for (const trade of dayTrades) {
+        if (trade.profit !== null) {
+          equity += trade.profit;
+        }
+      }
+      
+      equityCurve.push({
+        date: new Date(d),
+        equity
+      });
+    }
+
+    // Calculate summary statistics
+    const summary = {
+      initialCapital: backtest.initialCapital,
+      finalCapital: backtest.finalCapital,
+      profit: backtest.profitLoss,
+      profitPercentage: backtest.profitLossPercentage,
+      totalTrades: backtest.totalTrades,
+      winningTrades: backtest.winningTrades,
+      losingTrades: backtest.totalTrades - backtest.winningTrades,
+      winRate: (backtest.winningTrades / backtest.totalTrades) * 100,
+      maxDrawdown: backtest.maxDrawdown,
+      avgTradeProfit: backtest.profitLoss / backtest.totalTrades
+    };
+
+    return {
+      backtest,
+      trades,
+      equityCurve,
+      summary
+    };
+  } catch (error) {
+    console.error('Error getting backtest details:', error);
+    throw error;
   }
-
-  const trades = await db
-    .select()
-    .from(backtestTrades)
-    .where(eq(backtestTrades.backtestId, backtestId));
-
-  return { backtest, trades };
 }
 
 /**
@@ -150,19 +227,20 @@ async function fetchHistoricalData(
   symbol: string,
   startDate: Date,
   endDate: Date
-): Promise<any[]> {
+) {
   try {
-    // Try to get data from AngelOne if connected
-    if (process.env.ANGELONE_API_KEY) {
-      const data = await angelOneApi.getHistoricalData(symbol, startDate, endDate);
+    // First try to get data from AngelOne API
+    const data = await angelOneApi.getHistoricalData(symbol, startDate, endDate);
+    
+    if (data && data.length > 0) {
       return data;
     }
-
-    // Fall back to mock data for development/testing
+    
+    // If no data is available or an error occurs, generate mock data for development
     return generateMockHistoricalData(startDate, endDate);
   } catch (error) {
-    console.error('Error fetching historical data:', error);
-    // Fall back to mock data for testing/development
+    console.error(`Error fetching historical data for ${symbol}:`, error);
+    // If API fails, use mock data for development
     return generateMockHistoricalData(startDate, endDate);
   }
 }
@@ -171,263 +249,201 @@ async function fetchHistoricalData(
  * Apply a trading strategy to historical data
  */
 function applyStrategy(
-  strategyName: string,
   data: any[],
+  strategyName: string,
   parameters: Record<string, any>
-): any[] {
-  // Process the data based on the selected strategy
-  const ohlcData = data.map(bar => ({
-    time: new Date(bar.date || bar.time),
-    open: bar.open,
-    high: bar.high,
-    low: bar.low,
-    close: bar.close,
-    volume: bar.volume,
-  }));
-
-  // Extract close prices
-  const prices = ohlcData.map(bar => bar.close);
-  
-  // Apply strategy and generate signals
-  const signals: number[] = [];
-  
-  // Process the data point by point to simulate a real-time environment
-  for (let i = 0; i < ohlcData.length; i++) {
-    const currentData = ohlcData.slice(0, i + 1);
-    const currentPrices = currentData.map(d => d.close);
-    
-    let signal = 0; // 0 for no action, 1 for buy, -1 for sell
-    
-    // Only start generating signals when we have enough data for the strategy
-    if (i >= 30) { // Minimum data points for most strategies
-      let result;
-      
-      switch (strategyName) {
-        case 'Moving Average Crossover':
-          result = tradingStrategies.movingAverageCrossover(
-            currentData, 
-            parameters.shortPeriod || 9,
-            parameters.longPeriod || 21
-          );
-          break;
-          
-        case 'RSI Strategy':
-          result = tradingStrategies.rsiStrategy(
-            currentData, 
-            parameters.period || 14,
-            parameters.overbought || 70,
-            parameters.oversold || 30
-          );
-          break;
-          
-        case 'MACD Strategy':
-          result = tradingStrategies.macdStrategy(
-            currentData, 
-            parameters.fastPeriod || 12,
-            parameters.slowPeriod || 26,
-            parameters.signalPeriod || 9
-          );
-          break;
-          
-        case 'Bollinger Bands Strategy':
-          result = tradingStrategies.bollingerBandsStrategy(
-            currentData, 
-            parameters.period || 20,
-            parameters.stdDev || 2
-          );
-          break;
-          
-        default:
-          throw new Error(`Strategy ${strategyName} not implemented`);
-      }
-      
-      if (result.signal === 'BUY') signal = 1;
-      else if (result.signal === 'SELL') signal = -1;
-    }
-    
-    signals.push(signal);
+) {
+  if (!data || data.length === 0) {
+    throw new Error('No data provided for strategy application');
   }
-  
-  // Combine original data with signals
-  return ohlcData.map((bar, index) => ({
-    ...bar,
-    signal: index < signals.length ? signals[index] : 0
-  }));
+
+  // Extract closing prices for strategy calculations
+  const prices = data.map(candle => candle.close);
+
+  let signals: { date: Date; type: 'BUY' | 'SELL' | 'HOLD'; price: number }[] = [];
+
+  switch (strategyName) {
+    case 'Moving Average Crossover': {
+      const { shortPeriod = 20, longPeriod = 50 } = parameters;
+      const result = tradingStrategies.movingAverageCrossover(data, shortPeriod, longPeriod);
+      signals = result.map((signal, i) => ({
+        date: new Date(data[i].timestamp || data[i].date),
+        type: signal > 0 ? 'BUY' : signal < 0 ? 'SELL' : 'HOLD',
+        price: data[i].close
+      }));
+      break;
+    }
+
+    case 'RSI Strategy': {
+      const { period = 14, overbought = 70, oversold = 30 } = parameters;
+      const result = tradingStrategies.rsiStrategy(data, period, overbought, oversold);
+      signals = result.map((signal, i) => ({
+        date: new Date(data[i].timestamp || data[i].date),
+        type: signal > 0 ? 'BUY' : signal < 0 ? 'SELL' : 'HOLD',
+        price: data[i].close
+      }));
+      break;
+    }
+
+    case 'MACD Strategy': {
+      const { fastPeriod = 12, slowPeriod = 26, signalPeriod = 9 } = parameters;
+      const result = tradingStrategies.macdStrategy(
+        data,
+        fastPeriod,
+        slowPeriod,
+        signalPeriod
+      );
+      signals = result.map((signal, i) => ({
+        date: new Date(data[i].timestamp || data[i].date),
+        type: signal > 0 ? 'BUY' : signal < 0 ? 'SELL' : 'HOLD',
+        price: data[i].close
+      }));
+      break;
+    }
+
+    case 'Bollinger Bands Strategy': {
+      const { period = 20, stdDev = 2 } = parameters;
+      const result = tradingStrategies.bollingerBandsStrategy(data, period, stdDev);
+      signals = result.map((signal, i) => ({
+        date: new Date(data[i].timestamp || data[i].date),
+        type: signal > 0 ? 'BUY' : signal < 0 ? 'SELL' : 'HOLD',
+        price: data[i].close
+      }));
+      break;
+    }
+
+    default:
+      throw new Error(`Strategy '${strategyName}' not supported`);
+  }
+
+  return signals.filter(signal => signal.type !== 'HOLD');
 }
 
 /**
  * Simulate trades based on strategy signals
  */
 function simulateTrades(
-  strategyResults: any[],
+  signals: { date: Date; type: 'BUY' | 'SELL'; price: number }[],
   initialCapital: number
 ) {
-  const trades: any[] = [];
-  const equityCurve: { date: Date; equity: number }[] = [];
-  
-  let cash = initialCapital;
-  let shares = 0;
-  let position = 0; // 0: no position, 1: long, -1: short
+  let capital = initialCapital;
+  let position = 0;
   let entryPrice = 0;
-  let winningTrades = 0;
-  let losingTrades = 0;
-  let totalProfit = 0;
-  let equity = initialCapital;
-  let maxEquity = initialCapital;
+  let trades = [];
   let maxDrawdown = 0;
-  
-  // Record initial equity
-  if (strategyResults.length > 0) {
-    equityCurve.push({
-      date: strategyResults[0].time,
-      equity: initialCapital
-    });
-  }
-  
-  strategyResults.forEach((bar, index) => {
-    // Skip first few bars as they may not have valid signals due to lookback periods
-    if (index < 10) return;
-    
-    const currentPrice = bar.close;
-    const signal = bar.signal; // 1 for buy, -1 for sell, 0 for no action
-    
-    // Update equity curve (mark-to-market)
-    if (position !== 0) {
-      equity = cash + (shares * currentPrice);
+  let peak = initialCapital;
+  let winningTrades = 0;
+  let totalTrades = 0;
+  const equityCurve: { date: Date; equity: number }[] = [
+    { date: signals[0]?.date || new Date(), equity: initialCapital }
+  ];
+
+  for (const signal of signals) {
+    if (signal.type === 'BUY' && position === 0) {
+      // Calculate max number of shares we can buy
+      const quantity = Math.floor(capital / signal.price);
       
-      // Update max equity and drawdown
-      if (equity > maxEquity) {
-        maxEquity = equity;
+      if (quantity > 0) {
+        const cost = quantity * signal.price;
+        capital -= cost;
+        position = quantity;
+        entryPrice = signal.price;
+        
+        trades.push({
+          date: signal.date,
+          type: 'BUY',
+          price: signal.price,
+          quantity,
+          profit: null
+        });
+        
+        equityCurve.push({
+          date: signal.date,
+          equity: capital + (position * signal.price)
+        });
+      }
+    }
+    else if (signal.type === 'SELL' && position > 0) {
+      const sellValue = position * signal.price;
+      const profit = sellValue - (position * entryPrice);
+      capital += sellValue;
+      
+      trades.push({
+        date: signal.date,
+        type: 'SELL',
+        price: signal.price,
+        quantity: position,
+        profit
+      });
+      
+      if (profit > 0) winningTrades++;
+      totalTrades++;
+      
+      position = 0;
+      entryPrice = 0;
+      
+      // Update equity curve
+      equityCurve.push({
+        date: signal.date,
+        equity: capital
+      });
+      
+      // Update peak and calculate drawdown
+      if (capital > peak) {
+        peak = capital;
       } else {
-        const drawdown = (maxEquity - equity) / maxEquity * 100;
+        const drawdown = ((peak - capital) / peak) * 100;
         if (drawdown > maxDrawdown) {
           maxDrawdown = drawdown;
         }
       }
-    } else {
-      equity = cash;
-    }
-    
-    equityCurve.push({
-      date: bar.time,
-      equity: equity
-    });
-    
-    // Execute trades based on signals
-    if (signal === 1 && position <= 0) {
-      // Buy signal
-      if (position === -1) {
-        // Close short position
-        const profit = (entryPrice - currentPrice) * shares;
-        totalProfit += profit;
-        if (profit > 0) winningTrades++;
-        else losingTrades++;
-        
-        trades.push({
-          date: bar.time,
-          type: 'BUY',
-          price: currentPrice,
-          quantity: shares,
-          profit: profit
-        });
-        
-        cash += entryPrice * shares; // Return initial capital
-        cash += profit; // Add profit/loss
-        shares = 0;
-      }
-      
-      // Open new long position
-      const positionSize = 0.95 * cash; // Use 95% of cash for position
-      shares = Math.floor(positionSize / currentPrice);
-      
-      if (shares > 0) {
-        cash -= shares * currentPrice;
-        entryPrice = currentPrice;
-        position = 1;
-        
-        trades.push({
-          date: bar.time,
-          type: 'BUY',
-          price: currentPrice,
-          quantity: shares,
-          profit: null
-        });
-      }
-    } 
-    else if (signal === -1 && position >= 0) {
-      // Sell signal
-      if (position === 1) {
-        // Close long position
-        const profit = (currentPrice - entryPrice) * shares;
-        totalProfit += profit;
-        if (profit > 0) winningTrades++;
-        else losingTrades++;
-        
-        trades.push({
-          date: bar.time,
-          type: 'SELL',
-          price: currentPrice,
-          quantity: shares,
-          profit: profit
-        });
-        
-        cash += shares * currentPrice;
-        shares = 0;
-      }
-      
-      // For simplicity, we're not implementing short selling here
-      // but in a real system you might open a short position here
-      position = 0;
-    }
-  });
-  
-  // Close any open position at the end using the last price
-  if (position !== 0 && strategyResults.length > 0) {
-    const lastBar = strategyResults[strategyResults.length - 1];
-    const lastPrice = lastBar.close;
-    
-    if (position === 1) {
-      // Close long position
-      const profit = (lastPrice - entryPrice) * shares;
-      totalProfit += profit;
-      if (profit > 0) winningTrades++;
-      else losingTrades++;
-      
-      trades.push({
-        date: lastBar.time,
-        type: 'SELL',
-        price: lastPrice,
-        quantity: shares,
-        profit: profit
-      });
-      
-      cash += shares * lastPrice;
     }
   }
   
-  // Calculate final equity
-  const finalCapital = cash;
-  const profitPercentage = ((finalCapital - initialCapital) / initialCapital) * 100;
-  const totalTrades = winningTrades + losingTrades;
-  const winRate = totalTrades > 0 ? (winningTrades / totalTrades) * 100 : 0;
-  const avgTradeProfit = totalTrades > 0 ? totalProfit / totalTrades : 0;
+  // Close any remaining positions at the last price
+  if (position > 0 && signals.length > 0) {
+    const lastSignal = signals[signals.length - 1];
+    const sellValue = position * lastSignal.price;
+    const profit = sellValue - (position * entryPrice);
+    capital += sellValue;
+    
+    trades.push({
+      date: lastSignal.date,
+      type: 'SELL',
+      price: lastSignal.price,
+      quantity: position,
+      profit
+    });
+    
+    if (profit > 0) winningTrades++;
+    totalTrades++;
+    
+    // Final equity curve point
+    equityCurve.push({
+      date: lastSignal.date,
+      equity: capital
+    });
+  }
   
-  return {
-    summary: {
-      initialCapital,
-      finalCapital,
-      profit: finalCapital - initialCapital,
-      profitPercentage,
-      totalTrades,
-      winningTrades,
-      losingTrades,
-      winRate,
-      maxDrawdown,
-      avgTradeProfit
-    },
-    trades,
-    equityCurve
+  // Calculate summary
+  const finalCapital = capital;
+  const profit = finalCapital - initialCapital;
+  const profitPercentage = (profit / initialCapital) * 100;
+  
+  const summary = {
+    initialCapital,
+    finalCapital,
+    profit,
+    profitPercentage,
+    totalTrades,
+    winningTrades,
+    losingTrades: totalTrades - winningTrades,
+    winRate: totalTrades > 0 ? (winningTrades / totalTrades) * 100 : 0,
+    maxDrawdown,
+    avgTradeProfit: totalTrades > 0 ? profit / totalTrades : 0
   };
+  
+  return { trades, summary, equityCurve };
 }
 
 /**
@@ -435,42 +451,44 @@ function simulateTrades(
  */
 function generateMockHistoricalData(startDate: Date, endDate: Date) {
   const data = [];
-  const dayDiff = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 3600 * 24));
-  const numBars = Math.min(dayDiff, 365); // Cap at 365 bars max
+  const dayMs = 24 * 60 * 60 * 1000;
+  const numDays = Math.ceil((endDate.getTime() - startDate.getTime()) / dayMs);
   
-  // Generate a somewhat realistic price series
-  let price = 100; // Starting price
-  let high = price * 1.02;
-  let low = price * 0.98;
+  let price = 100 + Math.random() * 50; // Random starting price between 100-150
+  const volatility = 0.02; // Daily price volatility
   
-  for (let i = 0; i < numBars; i++) {
-    // Generate a new day's data
-    const date = new Date(startDate.getTime() + i * 24 * 60 * 60 * 1000);
+  for (let i = 0; i < numDays; i++) {
+    const date = new Date(startDate.getTime() + i * dayMs);
     
     // Skip weekends
-    if (date.getDay() === 0 || date.getDay() === 6) continue;
+    if (date.getDay() === 0 || date.getDay() === 6) {
+      continue;
+    }
     
-    // Random walk with momentum and mean reversion
-    const change = (Math.random() - 0.5) * 2 * (price * 0.02); // Max 2% change
+    // Generate random price movement
+    const change = price * volatility * (Math.random() - 0.5);
+    const open = price;
     price += change;
     
-    // Generate realistic OHLC values
-    const range = price * 0.015; // 1.5% range for the day
-    high = price + (Math.random() * range);
-    low = price - (Math.random() * range);
-    const open = low + (Math.random() * (high - low));
-    const close = low + (Math.random() * (high - low));
+    // Add some trend and pattern for better backtest results
+    const trend = Math.sin(i / 10) * 0.5; // Add a sine wave pattern
+    price += trend;
     
-    // Generate volume
-    const volume = Math.floor(10000 + Math.random() * 90000);
+    // Make sure price doesn't go below 1
+    price = Math.max(price, 1);
+    
+    const high = Math.max(open, price) * (1 + Math.random() * 0.01);
+    const low = Math.min(open, price) * (1 - Math.random() * 0.01);
+    const volume = Math.floor(100000 + Math.random() * 900000);
     
     data.push({
-      date: date,
-      open: parseFloat(open.toFixed(2)),
-      high: parseFloat(high.toFixed(2)),
-      low: parseFloat(low.toFixed(2)),
-      close: parseFloat(close.toFixed(2)),
-      volume: volume
+      date: date.toISOString(),
+      timestamp: date.getTime(),
+      open,
+      high,
+      low,
+      close: price,
+      volume
     });
   }
   

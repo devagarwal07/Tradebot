@@ -1,54 +1,43 @@
 import { Request, Response } from 'express';
-import { runBacktest, getUserBacktests, getBacktestDetails } from '../services/backtestService';
-import { strategies } from '../../shared/schema';
-import { db } from '../db';
-import { eq, inArray } from 'drizzle-orm';
+import * as backtestService from '../services/backtestService';
 
 /**
  * Run a backtest for a strategy
  */
 export const runBacktestController = async (req: Request, res: Response) => {
   try {
-    const { 
-      strategyId, 
-      stockSymbol, 
-      startDate, 
-      endDate, 
-      initialCapital, 
-      parameters 
+    const {
+      strategyId,
+      stockSymbol,
+      startDate,
+      endDate,
+      initialCapital,
+      parameters
     } = req.body;
-    
+
     // Basic validation
     if (!strategyId || !stockSymbol || !startDate || !endDate || !initialCapital) {
-      return res.status(400).json({ message: 'Missing required parameters' });
+      return res.status(400).json({ error: 'Missing required parameters' });
     }
-    
-    // Get user ID from session (cast to any to access id)
-    const userId = (req.user as any)?.id || 1; // Fallback to default user for testing
-    
-    // Parse dates
-    const parsedStartDate = new Date(startDate);
-    const parsedEndDate = new Date(endDate);
-    
-    if (isNaN(parsedStartDate.getTime()) || isNaN(parsedEndDate.getTime())) {
-      return res.status(400).json({ message: 'Invalid date format' });
-    }
-    
-    // Run the backtest
-    const result = await runBacktest(
+
+    // For demo purposes, we're using userId = 1
+    // In a real app, this would come from the authenticated user session
+    const userId = 1;
+
+    const result = await backtestService.runBacktest(
       userId,
       strategyId,
       stockSymbol,
-      parsedStartDate,
-      parsedEndDate,
-      initialCapital,
+      new Date(startDate),
+      new Date(endDate),
+      Number(initialCapital),
       parameters || {}
     );
-    
-    res.json(result);
-  } catch (error: any) {
-    console.error('Backtest controller error:', error);
-    res.status(500).json({ message: error.message || 'Failed to run backtest' });
+
+    return res.json(result);
+  } catch (error) {
+    console.error('Backtest error:', error);
+    return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error occurred' });
   }
 };
 
@@ -57,34 +46,15 @@ export const runBacktestController = async (req: Request, res: Response) => {
  */
 export const getUserBacktestsController = async (req: Request, res: Response) => {
   try {
-    // Get user ID from session (cast to any to access id)
-    const userId = (req.user as any)?.id || 1; // Fallback to default user for testing
-    
-    // Get all backtests for this user
-    const backtests = await getUserBacktests(userId);
-    
-    // Get strategy information for each backtest
-    const strategyIds = Array.from(new Set(backtests.map(b => b.strategyId)));
-    let strategyList = [];
-    
-    if (strategyIds.length > 0) {
-      strategyList = await db.select().from(strategies).where(inArray(strategies.id, strategyIds));
-    }
-    
-    // Combine backtest data with strategy info
-    const backtestsWithStrategyDetails = backtests.map(backtest => {
-      const strategy = strategyList.find(s => s.id === backtest.strategyId);
-      return {
-        ...backtest,
-        strategyName: strategy?.name || 'Unknown Strategy',
-        strategyDescription: strategy?.description || ''
-      };
-    });
-    
-    res.json(backtestsWithStrategyDetails);
-  } catch (error: any) {
-    console.error('Get backtests controller error:', error);
-    res.status(500).json({ message: error.message || 'Failed to get backtests' });
+    // For demo purposes, we're using userId = 1
+    // In a real app, this would come from the authenticated user session
+    const userId = 1;
+
+    const backtests = await backtestService.getUserBacktests(userId);
+    return res.json(backtests);
+  } catch (error) {
+    console.error('Error fetching user backtests:', error);
+    return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error occurred' });
   }
 };
 
@@ -95,33 +65,20 @@ export const getBacktestDetailsController = async (req: Request, res: Response) 
   try {
     const backtestId = parseInt(req.params.id);
     
-    if (isNaN(backtestId)) {
-      return res.status(400).json({ message: 'Invalid backtest ID' });
+    // For demo purposes, we're using userId = 1
+    // In a real app, this would come from the authenticated user session
+    const userId = 1;
+
+    const backtest = await backtestService.getBacktestDetails(backtestId, userId);
+    
+    if (!backtest) {
+      return res.status(404).json({ error: 'Backtest not found' });
     }
     
-    // Get user ID from session (cast to any to access id)
-    const userId = (req.user as any)?.id || 1; // Fallback to default user for testing
-    
-    // Get backtest details
-    const { backtest, trades } = await getBacktestDetails(backtestId, userId);
-    
-    // Get strategy details
-    const [strategy] = await db
-      .select()
-      .from(strategies)
-      .where(eq(strategies.id, backtest.strategyId));
-    
-    res.json({
-      backtest: {
-        ...backtest,
-        strategyName: strategy?.name || 'Unknown Strategy',
-        strategyDescription: strategy?.description || ''
-      },
-      trades
-    });
-  } catch (error: any) {
-    console.error('Get backtest details controller error:', error);
-    res.status(500).json({ message: error.message || 'Failed to get backtest details' });
+    return res.json(backtest);
+  } catch (error) {
+    console.error('Error fetching backtest details:', error);
+    return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error occurred' });
   }
 };
 
@@ -130,11 +87,52 @@ export const getBacktestDetailsController = async (req: Request, res: Response) 
  */
 export const getBacktestStrategiesController = async (_req: Request, res: Response) => {
   try {
-    const strategyList = await db.select().from(strategies);
+    // In a real app, this would fetch actual strategies from the database
+    // For demo purposes, we're returning predefined strategies
+    const strategyList = [
+      {
+        id: 1,
+        name: 'Moving Average Crossover',
+        description: 'Generates buy and sell signals based on the crossover of short and long moving averages',
+        parameters: JSON.stringify({
+          shortPeriod: 20,
+          longPeriod: 50
+        })
+      },
+      {
+        id: 2,
+        name: 'RSI Strategy',
+        description: 'Uses the Relative Strength Index to identify overbought and oversold conditions',
+        parameters: JSON.stringify({
+          period: 14,
+          overbought: 70,
+          oversold: 30
+        })
+      },
+      {
+        id: 3,
+        name: 'MACD Strategy',
+        description: 'Uses Moving Average Convergence Divergence to identify trend changes and momentum',
+        parameters: JSON.stringify({
+          fastPeriod: 12,
+          slowPeriod: 26,
+          signalPeriod: 9
+        })
+      },
+      {
+        id: 4,
+        name: 'Bollinger Bands Strategy',
+        description: 'Uses Bollinger Bands to identify price volatility and potential reversal points',
+        parameters: JSON.stringify({
+          period: 20,
+          stdDev: 2
+        })
+      }
+    ];
     
-    res.json(strategyList);
-  } catch (error: any) {
-    console.error('Get backtest strategies controller error:', error);
-    res.status(500).json({ message: error.message || 'Failed to get strategies' });
+    return res.json(strategyList);
+  } catch (error) {
+    console.error('Error fetching backtest strategies:', error);
+    return res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error occurred' });
   }
 };

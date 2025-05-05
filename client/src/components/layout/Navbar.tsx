@@ -35,6 +35,11 @@ export default function Navbar() {
               Portfolio
             </a>
           </Link>
+          <Link href="/backtest">
+            <a className={`font-medium ${isActiveLink("/backtest") ? "text-primary" : "text-neutral-600 hover:text-primary"}`}>
+              Backtest
+            </a>
+          </Link>
           <Link href="/settings">
             <a className={`font-medium ${isActiveLink("/settings") ? "text-primary" : "text-neutral-600 hover:text-primary"}`}>
               Settings

@@ -8,6 +8,7 @@ import Dashboard from "@/pages/Dashboard";
 import Strategies from "@/pages/Strategies";
 import Portfolio from "@/pages/Portfolio";
 import Settings from "@/pages/Settings";
+import Backtest from "@/pages/Backtest";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 
@@ -21,6 +22,7 @@ function Router() {
           <Route path="/strategies" component={Strategies} />
           <Route path="/portfolio" component={Portfolio} />
           <Route path="/settings" component={Settings} />
+          <Route path="/backtest" component={Backtest} />
           <Route component={NotFound} />
         </Switch>
       </div>
