@@ -571,24 +571,48 @@ export const getStrategies = async (req: Request, res: Response) => {
 // Get settings
 export const getSettings = async (req: Request, res: Response) => {
   try {
-    // In a real implementation, these would be fetched from a database
-    const mockSettings = {
-      apiKey: '****************************', // Masked for security
-      connected: true,
-      notifications: {
-        emailNotifications: true,
-        tradeAlerts: true,
-        performanceReports: false,
-        marketNews: true
-      },
-      risk: {
-        maxPositionSize: 10,
-        maxDailyLoss: 5,
-        defaultStopLoss: 2
-      }
+    // In a real implementation, we would get the userId from the authenticated session
+    // For now, we'll use a default userId of 1
+    const userId = 1;
+    
+    // Get settings from storage
+    let userSettings = await storage.getSettings(userId);
+    
+    // If settings don't exist yet, create default settings
+    if (!userSettings) {
+      const defaultSettings = {
+        userId,
+        apiKey: '',
+        connected: false,
+        notifications: {
+          emailNotifications: true,
+          tradeAlerts: true,
+          performanceReports: false,
+          marketNews: true
+        },
+        risk: {
+          maxPositionSize: 10,
+          maxDailyLoss: 5,
+          defaultStopLoss: 2
+        },
+        preferences: {
+          defaultTimeframe: '1D',
+          defaultIndicators: ['MovingAverage', 'Volume'],
+          defaultTheme: 'light',
+          autoRefresh: true
+        }
+      };
+      
+      userSettings = await storage.saveSettings(defaultSettings);
+    }
+    
+    // Mask the API key before sending it to the client
+    const settingsToReturn = {
+      ...userSettings,
+      apiKey: userSettings.apiKey ? '****************************' : ''
     };
     
-    return res.json(mockSettings);
+    return res.json(settingsToReturn);
   } catch (error) {
     console.error('Error in getSettings:', error);
     return res.status(500).json({ message: 'Internal server error' });
@@ -598,13 +622,49 @@ export const getSettings = async (req: Request, res: Response) => {
 // Save settings
 export const saveSettings = async (req: Request, res: Response) => {
   try {
-    const { apiKey, notifications, risk } = req.body;
+    const { apiKey, notifications, risk, preferences } = req.body;
     
-    // In a real implementation, these would be saved to a database
+    // In a real implementation, we would get the userId from the authenticated session
+    // For now, we'll use a default userId of 1
+    const userId = 1;
+    
+    // Check if api key was updated
+    let connected = false;
+    if (apiKey) {
+      try {
+        // Verify API key if provided
+        await angelOneApi.verifyApiKey(apiKey);
+        connected = true;
+      } catch (error) {
+        // If verification fails, return an error
+        return res.status(400).json({ message: 'Invalid API key' });
+      }
+    }
+    
+    // Save settings to storage
+    const settingsToSave = {
+      userId,
+      apiKey,
+      connected,
+      notifications,
+      risk,
+      preferences
+    };
+    
+    const savedSettings = await storage.saveSettings(settingsToSave);
+    
+    // Update environment variable for AngelOne API
+    if (apiKey) {
+      process.env.ANGELONE_API_KEY = apiKey;
+      
+      // Reinitialize AngelOne API with the new key
+      await angelOneApi.reinitializeAPI();
+    }
     
     return res.json({
       success: true,
-      message: 'Settings saved successfully'
+      message: 'Settings saved successfully',
+      connected
     });
   } catch (error) {
     console.error('Error in saveSettings:', error);
@@ -621,9 +681,20 @@ export const verifyApiKey = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'API key is required' });
     }
     
-    // In a real implementation, this would verify the API key with AngelOne
+    // Verify the API key with AngelOne
     try {
       const result = await angelOneApi.verifyApiKey(apiKey);
+      
+      // In a real implementation, we would get the userId from the authenticated session
+      // For now, we'll use a default userId of 1
+      const userId = 1;
+      
+      // Update the connected status in settings
+      const userSettings = await storage.getSettings(userId);
+      if (userSettings) {
+        await storage.updateSettings(userId, { connected: true });
+      }
+      
       return res.json(result);
     } catch (error) {
       return res.status(401).json({ message: 'Invalid API key' });

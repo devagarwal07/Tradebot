@@ -13,6 +13,13 @@ class AngelOneAPI {
     this.initializeAPI();
   }
 
+  // Public method to reinitialize the API when a new API key is provided
+  async reinitializeAPI() {
+    this.apiKey = process.env.ANGELONE_API_KEY || '';
+    await this.initializeAPI();
+    return { success: this.isInitialized };
+  }
+
   private async initializeAPI() {
     try {
       if (!this.apiKey) {
