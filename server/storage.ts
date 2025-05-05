@@ -1,4 +1,4 @@
-import { users, type User, type InsertUser } from "@shared/schema";
+import { users, type User, type InsertUser, settings, type Settings, type InsertSettings } from "@shared/schema";
 
 // modify the interface with any CRUD methods
 // you might need
@@ -7,6 +7,11 @@ export interface IStorage {
   getUser(id: number): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
+  
+  // Settings methods
+  getSettings(userId: number): Promise<Settings | undefined>;
+  saveSettings(settings: InsertSettings): Promise<Settings>;
+  updateSettings(userId: number, settingsData: Partial<InsertSettings>): Promise<Settings | undefined>;
 }
 
 export class MemStorage implements IStorage {

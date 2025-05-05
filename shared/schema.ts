@@ -158,3 +158,27 @@ export const insertPositionSchema = createInsertSchema(positions).pick({
 
 export type InsertPosition = z.infer<typeof insertPositionSchema>;
 export type Position = typeof positions.$inferSelect;
+
+// User settings schema
+export const settings = pgTable("settings", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id),
+  apiKey: text("api_key"),
+  connected: boolean("connected").default(false),
+  notifications: jsonb("notifications").notNull().default({}),
+  risk: jsonb("risk").notNull().default({}),
+  preferences: jsonb("preferences").notNull().default({}),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertSettingsSchema = createInsertSchema(settings).pick({
+  userId: true,
+  apiKey: true,
+  connected: true,
+  notifications: true,
+  risk: true,
+  preferences: true,
+});
+
+export type InsertSettings = z.infer<typeof insertSettingsSchema>;
+export type Settings = typeof settings.$inferSelect;
